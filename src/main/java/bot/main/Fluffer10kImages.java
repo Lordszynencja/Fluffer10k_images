@@ -8,6 +8,7 @@ import org.javacord.api.entity.intent.Intent;
 
 import bot.main.images.ImageCommands;
 import bot.main.serverCommands.ServerRoleCommands;
+import bot.main.serverCommands.ServerYeetusFeetusCommand;
 import bot.main.specialEvents.OnEntryHandler;
 import bot.main.util.userData.UserDataImagesUtils;
 import bot.util.apis.APIUtils;
@@ -22,6 +23,7 @@ public class Fluffer10kImages {
 
 	public final ImageCommands imageCommands;
 	public final ServerRoleCommands serverRoleCommands;
+	public final ServerYeetusFeetusCommand serverYeetusFeetusCommand;
 	public final OnEntryHandler onEntryHandler;
 
 	public Fluffer10kImages() throws IOException {
@@ -31,6 +33,7 @@ public class Fluffer10kImages {
 
 		imageCommands = new ImageCommands(this);
 		serverRoleCommands = new ServerRoleCommands(apiUtils);
+		serverYeetusFeetusCommand = new ServerYeetusFeetusCommand(apiUtils);
 		onEntryHandler = new OnEntryHandler(apiUtils);
 
 		apiUtils.endInit();
