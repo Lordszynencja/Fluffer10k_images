@@ -2,7 +2,6 @@ package bot.main.serverCommands;
 
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
@@ -19,11 +18,9 @@ import bot.util.apis.APIUtils;
 import bot.util.apis.MessageUtils;
 
 public class ServerRoleCommands {
-	private final APIUtils apiUtils;
+	private static final Map<Long, Set<Long>> serverAvailableRoles = new HashMap<>();
 
-	private final Map<Long, Set<Long>> serverAvailableRoles = new HashMap<>();
-
-	private void addRoles(final long serverId, final long... roleIds) {
+	private static void addRoles(final long serverId, final long... roleIds) {
 		final Set<Long> roleIdsSet = new HashSet<>();
 		for (final long roleId : roleIds) {
 			roleIdsSet.add(roleId);
@@ -31,17 +28,20 @@ public class ServerRoleCommands {
 		serverAvailableRoles.put(serverId, roleIdsSet);
 	}
 
-	private void addHandlingForServer(final long serverId, final long... roleIds) {
+	private static void addHandlingForServer(final APIUtils apiUtils, final long serverId, final long... roleIds) {
+		final Server server = apiUtils.api.getServerById(serverId).orElse(null);
+		if (server == null) {
+			return;
+		}
+
 		addRoles(serverId, roleIds);
 
-		apiUtils.commandHandlers.addServerSlashCommandHandler(serverId, "toggle_role", this::handle);
+		apiUtils.commandHandlers.addServerSlashCommandHandler(serverId, "toggle_role", ServerRoleCommands::handle);
 
 		final SlashCommandBuilder scb = SlashCommand.with("toggle_role", "Add/remove a role")//
 				.addOption(SlashCommandOption.create(SlashCommandOptionType.ROLE, "role",
 						"Role that you want to add/remove", true));
-
-		final Server server = apiUtils.api.getServerById(serverId).get();
-		final List<SlashCommand> serverCommands = server.getSlashCommands().join();
+		final Set<SlashCommand> serverCommands = server.getSlashCommands().join();
 		if (!serverCommands.stream().filter(
 				cmd -> cmd.getApplicationId() == apiUtils.api.getClientId() && cmd.getName().equals("toggle_role"))
 				.findAny().isPresent()) {
@@ -49,10 +49,26 @@ public class ServerRoleCommands {
 		}
 	}
 
-	public ServerRoleCommands(final APIUtils apiUtils) {
-		this.apiUtils = apiUtils;
+	private static void handle(final SlashCommandInteraction interaction) {
+		final Role role = interaction.getArgumentRoleValueByName("role").get();
+		if (!serverAvailableRoles.get(interaction.getServer().get().getId()).contains(role.getId())) {
+			MessageUtils.sendEphemeralMessage(interaction, "You can't change this role");
+			return;
+		}
 
-		addHandlingForServer(886993994284945468L, // Kennecs Frenland
+		final User user = interaction.getUser();
+
+		if (user.getRoles(interaction.getServer().get()).contains(role)) {
+			user.removeRole(role, "Removed by user using the bot").join();
+			MessageUtils.sendEphemeralMessage(interaction, "Role " + role.getMentionTag() + " has been removed");
+		} else {
+			user.addRole(role, "Added by user using the bot").join();
+			MessageUtils.sendEphemeralMessage(interaction, "Role " + role.getMentionTag() + " has been added");
+		}
+	}
+
+	public static void init(final APIUtils apiUtils) {
+		addHandlingForServer(apiUtils, 886993994284945468L, // Kennecs Frenland
 				913777223541071962L, // dominant
 				913777137830465557L, // submissive
 				913777294873624606L, // pred
@@ -70,23 +86,5 @@ public class ServerRoleCommands {
 				913778400596987965L, // animator
 				933875630339162193L // anarchist
 		);
-	}
-
-	private void handle(final SlashCommandInteraction interaction) {
-		final Role role = interaction.getOptionRoleValueByName("role").get();
-		if (!serverAvailableRoles.get(interaction.getServer().get().getId()).contains(role.getId())) {
-			MessageUtils.sendEphemeralMessage(interaction, "You can't change this role");
-			return;
-		}
-
-		final User user = interaction.getUser();
-
-		if (user.getRoles(interaction.getServer().get()).contains(role)) {
-			user.removeRole(role, "Removed by user using the bot").join();
-			MessageUtils.sendEphemeralMessage(interaction, "Role " + role.getMentionTag() + " has been removed");
-		} else {
-			user.addRole(role, "Added by user using the bot").join();
-			MessageUtils.sendEphemeralMessage(interaction, "Role " + role.getMentionTag() + " has been added");
-		}
 	}
 }
