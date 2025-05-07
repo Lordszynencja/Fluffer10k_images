@@ -97,7 +97,7 @@ public class ImageCommands {
 			final InteractionImmediateResponseBuilder responder = interaction.createImmediateResponder();
 
 			final EmbedBuilder embed = new EmbedBuilder();
-			final String userName = interaction.getUser().getDisplayName(interaction.getServer().get());
+			final String userName = APIUtils.getUserName(interaction.getUser(), interaction.getServer().orElse(null));
 			final String argument = interaction.getArgumentStringValueByIndex(0).orElse(null);
 			if (argument != null) {
 				if (answerWithParam != null) {
@@ -206,6 +206,7 @@ public class ImageCommands {
 		addImageCommandSFW(apiUtils, "hehe", "Smile", null, null);
 		addImageCommandSFW(apiUtils, "hora", "Hora hora~", null, null);
 		addImageCommandSFW(apiUtils, "hug", "Hug someone", null, "%1$s hugs %2$s");
+		addImageCommandSFW(apiUtils, "humg", "Humg someone", null, "%1$s humgs %2$s");
 		addImageCommandSFW(apiUtils, "kiss", "Kiss someone", null, "%1$s kisses %2$s");
 		addImageCommandSFW(apiUtils, "lap", "Lap pillow!", "%1$s lays on a lap pillow",
 				"%1$s lets %2$s lay on their lap pillow");
