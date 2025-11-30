@@ -56,7 +56,9 @@ public class UserDataImagesUtils {
 			}
 
 			try {
-				FileUtils.saveJSONFileWithBackup(usersDataFilePath, data);
+				if (!fluffer10kImages.apiUtils.config.getBoolean("debug")) {
+					FileUtils.saveJSONFileWithBackup(usersDataFilePath, data);
+				}
 			} catch (final IOException e) {
 				e.printStackTrace();
 			}

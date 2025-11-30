@@ -4,11 +4,7 @@ import java.io.IOException;
 import java.util.List;
 
 import org.javacord.api.entity.message.embed.EmbedBuilder;
-import org.javacord.api.interaction.SlashCommand;
-import org.javacord.api.interaction.SlashCommandBuilder;
 import org.javacord.api.interaction.SlashCommandInteraction;
-import org.javacord.api.interaction.SlashCommandOption;
-import org.javacord.api.interaction.SlashCommandOptionType;
 import org.javacord.api.interaction.callback.InteractionImmediateResponseBuilder;
 
 import bot.main.util.userData.UserDataImages;
@@ -18,6 +14,8 @@ import bot.util.RandomUtils;
 import bot.util.apis.APIUtils;
 import bot.util.apis.CommandHandlers.SlashCommandHandler;
 import bot.util.apis.MessageUtils;
+import bot.util.apis.commands.FlufferCommand;
+import bot.util.apis.commands.FlufferCommandStringOption;
 
 public class ImageCommands {
 	private static String[] loadImageUrlsFromFileForCmd(final String dir, final String cmd, final boolean nsfw) {
@@ -32,6 +30,7 @@ public class ImageCommands {
 	}
 
 	private class SimpleImageCommandHandler implements SlashCommandHandler {
+		private final APIUtils apiUtils;
 		private final MessageUtils messageUtils;
 
 		private final String cmd;
@@ -42,9 +41,10 @@ public class ImageCommands {
 		private final String[] sfwLinks;
 		private final String[] nsfwLinks;
 
-		public SimpleImageCommandHandler(final MessageUtils messageUtils, final String cmd,
+		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
 				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
 				final String[] sfwLinks, final String[] nsfwLinks) {
+			this.apiUtils = apiUtils;
 			this.messageUtils = messageUtils;
 			this.cmd = cmd;
 			this.answerWithoutParam = answerWithoutParam;
@@ -54,23 +54,23 @@ public class ImageCommands {
 			this.nsfwLinks = nsfwLinks == null || nsfwLinks.length == 0 ? sfwLinks : nsfwLinks;
 		}
 
-		public SimpleImageCommandHandler(final MessageUtils messageUtils, final String cmd,
+		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
 				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW) {
-			this(messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
+			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
 					isNSFW ? null : loadImageUrlsFromFileForCmd(imageDir, cmd, false),
 					loadImageUrlsFromFileForCmd(imageDir, cmd, true));
 		}
 
-		public SimpleImageCommandHandler(final MessageUtils messageUtils, final String cmd,
+		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
 				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
 				final String urlSFW, final String urlNSFW) {
-			this(messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
+			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
 					isNSFW ? null : new String[] { urlNSFW }, urlNSFW == null ? null : new String[] { urlNSFW });
 		}
 
-		public SimpleImageCommandHandler(final MessageUtils messageUtils, final String cmd,
+		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
 				final String answerWithoutParam, final String answerWithParam, final String url) {
-			this(messageUtils, cmd, answerWithoutParam, answerWithParam, false, url, url);
+			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, false, url, url);
 		}
 
 		private int addInteractionForMentions(final Long authorId, final List<Long> mentionIds) {
@@ -97,12 +97,12 @@ public class ImageCommands {
 			final InteractionImmediateResponseBuilder responder = interaction.createImmediateResponder();
 
 			final EmbedBuilder embed = new EmbedBuilder();
-			final String userName = APIUtils.getUserName(interaction.getUser(), interaction.getServer().orElse(null));
+			final String userName = apiUtils.getUserName(interaction.getUser(), interaction.getServer().orElse(null));
 			final String argument = interaction.getArgumentStringValueByIndex(0).orElse(null);
 			if (argument != null) {
 				if (answerWithParam != null) {
 					embed.setDescription(String.format(answerWithParam, userName,
-							messageUtils.replaceMentionsWithUserNames(argument, interaction.getServer().get())));
+							messageUtils.replaceMentionsWithUserNames(argument, interaction.getServer().orElse(null))));
 				}
 
 				final List<Long> mentionIds = MessageUtils.getUserMentionIds(argument);
@@ -149,19 +149,21 @@ public class ImageCommands {
 		addImageCommand(apiUtils, cmd, description, answerWithoutParam, answerWithParam, true, aliases);
 	}
 
-	private void addImageCommand(final APIUtils apiUtils, final String cmd, final String description,
+	private void addImageCommand(final APIUtils apiUtils, final String name, final String description,
 			final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
 			final String... aliases) {
-		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils.messageUtils, cmd,
+		final FlufferCommand cmd = new FlufferCommand(name, description)//
+				.nsfw(isNSFW)//
+				.addOption(new FlufferCommandStringOption("target", "target"));
+		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils, apiUtils.messageUtils, name,
 				answerWithoutParam, answerWithParam, isNSFW);
 
-		final SlashCommandBuilder scb = SlashCommand.with(cmd, description)//
-				.addOption(SlashCommandOption.create(SlashCommandOptionType.STRING, "target", "target"));
-		apiUtils.commandHandlers.addSlashCommandHandler(cmd, handler, scb);
+		apiUtils.commandHandlers.addCommandHandler(cmd, handler);
 		for (final String alias : aliases) {
-			final SlashCommandBuilder scbAlias = SlashCommand.with(alias, description)//
-					.addOption(SlashCommandOption.create(SlashCommandOptionType.STRING, "target", "target"));
-			apiUtils.commandHandlers.addCommandAlias(cmd, alias, scbAlias);
+			final FlufferCommand aliasCmd = new FlufferCommand(alias, description)//
+					.nsfw(isNSFW)//
+					.addOption(new FlufferCommandStringOption("target", "target"));
+			apiUtils.commandHandlers.addCommandAlias(name, aliasCmd);
 		}
 	}
 
@@ -170,16 +172,16 @@ public class ImageCommands {
 		addTargetlessImageCommand(apiUtils, cmd, description, null, null, url, aliases);
 	}
 
-	private void addTargetlessImageCommand(final APIUtils apiUtils, final String cmd, final String description,
+	private void addTargetlessImageCommand(final APIUtils apiUtils, final String name, final String description,
 			final String answerWithoutParam, final String answerWithParam, final String url, final String... aliases) {
-		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils.messageUtils, cmd,
+		final FlufferCommand cmd = new FlufferCommand(name, description);
+		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils, apiUtils.messageUtils, name,
 				answerWithoutParam, answerWithParam, url);
 
-		final SlashCommandBuilder scb = SlashCommand.with(cmd, description);
-		apiUtils.commandHandlers.addSlashCommandHandler(cmd, handler, scb);
+		apiUtils.commandHandlers.addCommandHandler(cmd, handler);
 		for (final String alias : aliases) {
-			final SlashCommandBuilder scbAlias = SlashCommand.with(alias, description);
-			apiUtils.commandHandlers.addCommandAlias(cmd, alias, scbAlias);
+			final FlufferCommand aliasCmd = new FlufferCommand(alias, description);
+			apiUtils.commandHandlers.addCommandAlias(alias, aliasCmd);
 		}
 	}
 
