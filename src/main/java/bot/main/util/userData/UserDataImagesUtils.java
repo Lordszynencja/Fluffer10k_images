@@ -30,7 +30,7 @@ public class UserDataImagesUtils {
 
 		startRepeatedTimedEvent(this::saveData, 60 * 60, 0, "saving user data");
 
-		addOnExit(this::onExit);
+		addOnExit("saving user images data", this::onExit);
 	}
 
 	@SuppressWarnings("unchecked")
