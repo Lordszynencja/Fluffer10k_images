@@ -1,290 +1,220 @@
 package bot.main.images;
 
-import java.io.IOException;
+import static java.util.Arrays.asList;
+
 import java.util.List;
 
-import org.javacord.api.entity.message.embed.EmbedBuilder;
-import org.javacord.api.interaction.SlashCommandInteraction;
-import org.javacord.api.interaction.callback.InteractionImmediateResponseBuilder;
-
-import bot.main.util.userData.UserDataImages;
 import bot.main.util.userData.UserDataImagesUtils;
-import bot.util.FileUtils;
-import bot.util.RandomUtils;
 import bot.util.apis.APIUtils;
 import bot.util.apis.CommandHandlers.SlashCommandHandler;
-import bot.util.apis.MessageUtils;
 import bot.util.apis.commands.FlufferCommand;
 import bot.util.apis.commands.FlufferCommandStringOption;
 
 public class ImageCommands {
-	private static String[] loadImageUrlsFromFileForCmd(final String dir, final String cmd, final boolean nsfw) {
-		try {
-			final String path = dir + "imgCommands/" + cmd.replace(" ", "_") + "/"
-					+ (nsfw ? "linksNSFW.txt" : "links.txt");
+	private class ImageCommandAdder {
+		private String name = null;
+		private String[] aliases = new String[0];
+		private String description = null;
+		private boolean nsfw = false;
+		private boolean hasTarget = false;
 
-			return FileUtils.readFileLines(path);
-		} catch (final IOException e) {
-			return new String[0];
+		private String answer = null;
+		private String targetAnswer = null;
+		private String[] aliasesTargetAnswers = null;
+
+		public ImageCommandAdder name(final String name) {
+			this.name = name;
+			return this;
+		}
+
+		public ImageCommandAdder aliases(final String... aliases) {
+			this.aliases = aliases;
+			return this;
+		}
+
+		public ImageCommandAdder description(final String description) {
+			this.description = description;
+			return this;
+		}
+
+		public ImageCommandAdder nsfw() {
+			nsfw = true;
+			return this;
+		}
+
+		public ImageCommandAdder hasTarget() {
+			hasTarget = true;
+			return this;
+		}
+
+		public ImageCommandAdder answer(final String answer) {
+			this.answer = answer;
+			return this;
+		}
+
+		public ImageCommandAdder targetAnswer(final String targetAnswer) {
+			hasTarget = true;
+			this.targetAnswer = targetAnswer;
+			return this;
+		}
+
+		public ImageCommandAdder aliasesTargetAnswers(final String... aliasesTargetAnswers) {
+			this.aliasesTargetAnswers = aliasesTargetAnswers;
+			return this;
+		}
+
+		private void add(final APIUtils apiUtils) {
+			FlufferCommand cmd = new FlufferCommand(name, description)//
+					.nsfw(nsfw);
+			if (hasTarget) {
+				cmd = cmd.addOption(new FlufferCommandStringOption("target", "target"));
+			}
+
+			final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils, apiUtils.messageUtils,
+					userDataImagesUtils, imageDir, name, answer, targetAnswer, nsfw, sfwBot);
+
+			apiUtils.commandHandlers.addCommandHandler(cmd, handler);
+			if (aliasesTargetAnswers == null) {
+				for (final String alias : aliases) {
+					apiUtils.commandHandlers.addCommandAlias(name, cmd.clone().name(alias));
+				}
+			} else {
+				for (int i = 0; i < aliases.length; i++) {
+					final SlashCommandHandler aliasHandler = new SimpleImageCommandHandler(apiUtils,
+							apiUtils.messageUtils, userDataImagesUtils, imageDir, name, answer, aliasesTargetAnswers[i],
+							nsfw, sfwBot);
+					apiUtils.commandHandlers.addCommandHandler(cmd.clone().name(aliases[i]), aliasHandler);
+				}
+			}
 		}
 	}
 
-	private class SimpleImageCommandHandler implements SlashCommandHandler {
-		private final APIUtils apiUtils;
-		private final MessageUtils messageUtils;
-
-		private final String cmd;
-		private final String answerWithoutParam;
-		private final String answerWithParam;
-		private final boolean isNSFW;
-
-		private final String[] sfwLinks;
-		private final String[] nsfwLinks;
-
-		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
-				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
-				final String[] sfwLinks, final String[] nsfwLinks) {
-			this.apiUtils = apiUtils;
-			this.messageUtils = messageUtils;
-			this.cmd = cmd;
-			this.answerWithoutParam = answerWithoutParam;
-			this.answerWithParam = answerWithParam;
-			this.isNSFW = isNSFW;
-			this.sfwLinks = sfwLinks;
-			this.nsfwLinks = nsfwLinks == null || nsfwLinks.length == 0 ? sfwLinks : nsfwLinks;
-		}
-
-		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
-				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW) {
-			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
-					isNSFW ? null : loadImageUrlsFromFileForCmd(imageDir, cmd, false),
-					loadImageUrlsFromFileForCmd(imageDir, cmd, true));
-		}
-
-		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
-				final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
-				final String urlSFW, final String urlNSFW) {
-			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, isNSFW,
-					isNSFW ? null : new String[] { urlNSFW }, urlNSFW == null ? null : new String[] { urlNSFW });
-		}
-
-		public SimpleImageCommandHandler(final APIUtils apiUtils, final MessageUtils messageUtils, final String cmd,
-				final String answerWithoutParam, final String answerWithParam, final String url) {
-			this(apiUtils, messageUtils, cmd, answerWithoutParam, answerWithParam, false, url, url);
-		}
-
-		private int addInteractionForMentions(final Long authorId, final List<Long> mentionIds) {
-			int min = Integer.MAX_VALUE;
-			for (final long userId : mentionIds) {
-				final UserDataImages userData = userDataImagesUtils.getUserData(userId);
-				final int amount = userData.addInteraction(cmd, authorId);
-				if (amount < min) {
-					min = amount;
-				}
-			}
-
-			return min;
-		}
-
-		@Override
-		public void handle(final SlashCommandInteraction interaction) {
-			final boolean isNSFWChannel = MessageUtils.isNSFWChannel(interaction);
-			if (!isNSFWChannel && isNSFW) {
-				MessageUtils.sendEphemeralMessage(interaction, "This command cannot be used here");
-				return;
-			}
-
-			final InteractionImmediateResponseBuilder responder = interaction.createImmediateResponder();
-
-			final EmbedBuilder embed = new EmbedBuilder();
-			final String userName = apiUtils.getUserName(interaction.getUser(), interaction.getServer().orElse(null));
-			final String argument = interaction.getArgumentStringValueByIndex(0).orElse(null);
-			if (argument != null) {
-				if (answerWithParam != null) {
-					embed.setDescription(String.format(answerWithParam, userName,
-							messageUtils.replaceMentionsWithUserNames(argument, interaction.getServer().orElse(null))));
-				}
-
-				final List<Long> mentionIds = MessageUtils.getUserMentionIds(argument);
-				if (!mentionIds.isEmpty()) {
-					final int amount = addInteractionForMentions(interaction.getUser().getId(), mentionIds);
-					final String footerText = "You did it " + (amount == 1 ? "1 time" : amount + " times");
-					embed.setFooter(footerText);
-				}
-
-				responder.append(String.join(" ", MessageUtils.getMentions(argument)));
-			} else {
-				if (answerWithoutParam != null) {
-					embed.setDescription(String.format(answerWithoutParam, userName));
-				}
-			}
-
-			final String[] picsList = isNSFWChannel ? nsfwLinks : sfwLinks;
-			final String imgUrl = RandomUtils.getRandom(picsList);
-			embed.setImage(imgUrl);
-
-			responder.addEmbed(embed).respond();
-		}
+	private ImageCommandAdder cmd(final String name, final String description) {
+		return new ImageCommandAdder().name(name).description(description);
 	}
 
 	private final UserDataImagesUtils userDataImagesUtils;
 	private final String imageDir;
+	private final boolean sfwBot;
 
-	public ImageCommands(final UserDataImagesUtils userDataImagesUtils, final String imageFolderPath) {
+	public ImageCommands(final UserDataImagesUtils userDataImagesUtils, final String imageFolderPath,
+			final boolean sfwBot) {
 		this.userDataImagesUtils = userDataImagesUtils;
 
 		if (imageFolderPath == null) {
 			throw new RuntimeException("imageFolderPath is missing!");
 		}
 		imageDir = imageFolderPath;
+		this.sfwBot = sfwBot;
 	}
 
-	private void addImageCommandSFW(final APIUtils apiUtils, final String cmd, final String description,
-			final String answerWithoutParam, final String answerWithParam, final String... aliases) {
-		addImageCommand(apiUtils, cmd, description, answerWithoutParam, answerWithParam, false, aliases);
-	}
-
-	private void addImageCommandNSFW(final APIUtils apiUtils, final String cmd, final String description,
-			final String answerWithoutParam, final String answerWithParam, final String... aliases) {
-		addImageCommand(apiUtils, cmd, description, answerWithoutParam, answerWithParam, true, aliases);
-	}
-
-	private void addImageCommand(final APIUtils apiUtils, final String name, final String description,
-			final String answerWithoutParam, final String answerWithParam, final boolean isNSFW,
-			final String... aliases) {
-		final FlufferCommand cmd = new FlufferCommand(name, description)//
-				.nsfw(isNSFW)//
-				.addOption(new FlufferCommandStringOption("target", "target"));
-		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils, apiUtils.messageUtils, name,
-				answerWithoutParam, answerWithParam, isNSFW);
-
-		apiUtils.commandHandlers.addCommandHandler(cmd, handler);
-		for (final String alias : aliases) {
-			final FlufferCommand aliasCmd = new FlufferCommand(alias, description)//
-					.nsfw(isNSFW)//
-					.addOption(new FlufferCommandStringOption("target", "target"));
-			apiUtils.commandHandlers.addCommandAlias(name, aliasCmd);
-		}
-	}
-
-	private void addTargetlessImageCommandWithoutAnswer(final APIUtils apiUtils, final String cmd,
-			final String description, final String url, final String... aliases) {
-		addTargetlessImageCommand(apiUtils, cmd, description, null, null, url, aliases);
-	}
-
-	private void addTargetlessImageCommand(final APIUtils apiUtils, final String name, final String description,
-			final String answerWithoutParam, final String answerWithParam, final String url, final String... aliases) {
-		final FlufferCommand cmd = new FlufferCommand(name, description);
-		final SlashCommandHandler handler = new SimpleImageCommandHandler(apiUtils, apiUtils.messageUtils, name,
-				answerWithoutParam, answerWithParam, url);
-
-		apiUtils.commandHandlers.addCommandHandler(cmd, handler);
-		for (final String alias : aliases) {
-			final FlufferCommand aliasCmd = new FlufferCommand(alias, description);
-			apiUtils.commandHandlers.addCommandAlias(alias, aliasCmd);
-		}
-	}
+	private final List<ImageCommandAdder> commands = asList(
+			cmd("angry_stare", "Stare at someone angrily").targetAnswer("%1$s stares angrily at %2$s"), //
+			cmd("assgrab", "Grab some ass").nsfw().targetAnswer("%1$s grabs ass of %2$s"), //
+			cmd("birthday", "Wish someone happy birthday").targetAnswer("%1$s wishes %2$s happy birthday"), //
+			cmd("bite", "Bite someone").targetAnswer("%1$s bites %2$s"), //
+			cmd("blowjob", "Give someone pleasure").nsfw().targetAnswer("%1$s gives a blowjob to %2$s")//
+					.aliases("suck").aliasesTargetAnswers("%1$s sucks off %2$s"), //
+			cmd("bonk", "Bonk someone on the head").targetAnswer("%1$s bonks %2$s"), //
+			cmd("boobgrab", "Grab something soft").nsfw().targetAnswer("%1$s grabs boobs of %2$s")//
+					.aliases("breastgrab", "grope", "titgrab")
+					.aliasesTargetAnswers("%1$s grabs breasts of %2$s", "%1$s gropes %2$s", "%1$s grabs tits of %2$s"), //
+			cmd("boobhug", "Give someone happiness").nsfw().targetAnswer("%1$s boobhugs %2$s"), //
+			cmd("boop", "Boop someone").targetAnswer("%1$s boops %2$s"), //
+			cmd("bootyshake", "Shake that ass").nsfw().answer("%1$s shakes the booty")
+					.targetAnswer("%1$s shakes the booty for %2$s"), //
+			cmd("brazil", "Send someone to Brazil").answer("%1$s goes to Brazil")
+					.targetAnswer("%1$s sends %2$s to Brazil"), //
+			cmd("coil", "Coil around someone").nsfw().targetAnswer("%1$s coils around %2$s"), //
+			cmd("cringe", "Criiinge").answer("%1$s cringes").targetAnswer("%1$s cringes at %2$s"), //
+			cmd("cuddle", "Cuddle with someone").targetAnswer("%1$s cuddles with %2$s"), //
+			cmd("cum", "Orgasm!").nsfw().answer("%1$s orgasms").targetAnswer("%1$s orgasms with %2$s"), //
+			cmd("cum_on", "Cum on someone else!").nsfw().answer("%1$s cums").targetAnswer("%1$s cums on %2$s"), //
+			cmd("dance", "Dance dance").answer("%1$s dances").targetAnswer("%1$s dances for %2$s"), //
+			cmd("drool", "heheeeee~").answer("%1$s drools").targetAnswer("%1$s drools over %2$s"), //
+			cmd("everyone", "Everyone!").hasTarget(), //
+			cmd("facesit", "Sit on someone's face").nsfw().targetAnswer("%1$s sat on the face of %2$s"), //
+			cmd("feelbonacci", "The feels don't stop").answer(
+					"https://cdn.discordapp.com/attachments/831093717376172032/831280567776706600/feelbonacci.jpg"), //
+			cmd("feelsgood", "Mhmmmm~").answer(
+					"https://cdn.discordapp.com/attachments/831093717376172032/831280729404211250/feelsgood.png"), //
+			cmd("fuck", "You can guess what this does~").nsfw().targetAnswer("%1$s fucks with %2$s"), //
+			cmd("fuck_gif", "You can guess what this does~").nsfw().targetAnswer("%1$s fucks with %2$s"), //
+			cmd("gaskelly", "GAS GAS GAS").answer(
+					"https://media.discordapp.net/attachments/456149873507565568/585316940193595392/image0_2.gif?comment=DO_YOU_LIKE_MY_CAR?_GUESS_YOU%27RE_READY_CAUSE_IM_WAITING_FOR_YOU._IT%27S_GONNA_BE_EXCITING!_GOT_THIS_FEELING_REALLY_DEEP_IN_MY_SOUL._LETS_GET_OUT_I_WANNA_GO_COME_ALONG_GET_IT_ON._GONNA_TAKE_MY_CAR_GONNA_DRIVE_IT._GONNA_DRIVE_ALONE_TILL_I_GET_YOU_CAUSE_IM_CRAZY_HOT_AND_READY_BUT_YOULL_LIKE_IT._I_WANNA_RACE_FOR_YOU_SHALL_I_GO_NOW._GAS_GAS_GAS_IM_GONNA_STEP_ON_THE_GAS_TONIGHT_ILL_FLY_AND_BE_YOUR_LOVER._YEAH_YEAH_YEAH_ILL_BE_SO_QUICK_AS_A_FLASH_AND_ILL_BE_YOUR_HERO._GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_AND_YOULL_SEE_THE_BIG_SHOW._DONT_BE_LAZY_CAUSE_IM_BURNING_FOR_YOU._ITS_LIKE_A_HOT_SENSATION_GOT_THIS_POWER_THAT_IS_TAKING_ME_OUT._YES_IVE_GOT_A_CRASH_ON_YOU_READY_NOW_READY_GO._GONNA_TAKE_MY_CAR_GONNA_DRIVE_IT._GONNA_DRIVE_ALONE_TILL_I_GET_YOU_CAUSE_IM_CRAZY_HOT_AND_READY_BUT_YOULL_LIKE_IT._I_WANNA_RACE_FOR_YOU_SHALL_I_GO_NOW_GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_AND_YOULL_SEE_THE_BIG_SHOW._GAS_GAS_GAS_IM_GONNA_STEP_ON_THE_GAS_TONIGHT_ILL_FLY_AND_BE_YOUR_LOVER._YEAH_YEAH_YEAH_ILL_BE_SO_QUICK_AS_A_FLASH_AND_ILL_BE_YOUR_HERO._GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_ANY_YOULL_SEE_THE_BIG_SHOW"), //
+			cmd("gay", "Ha! GAYYYYYYYYYYYY").hasTarget(), //
+			cmd("gibhug", "Demand a hug").answer("%1$s wants a hug").targetAnswer("%1$s wants to be hugged by %2$s"), //
+			cmd("gibpat", "Demand a headpat").answer("%1$s demands a pat")
+					.targetAnswer("%1$s demands to be pat by %2$s"), //
+			cmd("glomp", "Give someone a surprise hug!").targetAnswer("%1$s glomps %2$s"), //
+			cmd("good_night", "Sleep well"), //
+			cmd("handjob", "Pleasure someone").nsfw().targetAnswer("%1$s gives a handjob to %2$s"), //
+			cmd("hehe", "Smile").targetAnswer("%1$s smiles at %2$s"), //
+			cmd("hora", "Hora hora~").hasTarget(), //
+			cmd("hug", "Hug someone").targetAnswer("%1$s hugs %2$s"), //
+			cmd("humg", "Humg someone").targetAnswer("%1$s humgs %2$s"), //
+			cmd("kiss", "Kiss someone").targetAnswer("%1$s kisses %2$s"), //
+			cmd("lap", "Lap pillow!").answer("%1$s lays on a lap pillow")
+					.targetAnswer("%1$s lets %2$s lay on their lap pillow"), //
+			cmd("lick", "Lick someone").targetAnswer("%1$s licks %2$s"), //
+			cmd("massage", "Massage someone").targetAnswer("%1$s massages %2$s"), //
+			cmd("n", "NNNNNNNNNNNNNNNNNNNN-")
+					.answer("https://cdn.discordapp.com/attachments/831093717376172032/831278978693857280/n.gif"), //
+			cmd("no", "Say no").targetAnswer("%1$s says no to %2$s"), //
+			cmd("nom", "Nom someone").answer("%1$s noms").targetAnswer("%1$s noms %2$s"), //
+			cmd("nuzzle", "Nuzzle someone").targetAnswer("%1$s nuzzles %2$s"), //
+			cmd("out", "Show someone exit")
+					.answer("https://cdn.discordapp.com/attachments/831093717376172032/831280225617707058/out.jpg"), //
+			cmd("padoru", "Hashire sori yo, Kaze no you ni, Tsukimihara wo, PADORU PADORU"), //
+			cmd("pat", "Pat someone").targetAnswer("%1$s pats %2$s"), //
+			cmd("peck", "Peck someone").targetAnswer("%1$s pecked %2$s on the cheek"), //
+			cmd("peg", "Peg someone").nsfw().targetAnswer("%1$s pegs %2$s"), //
+			cmd("pizza", "Give someone pizza").targetAnswer("%1$s gave pizza to %2$s"), //
+			cmd("poke", "Poke someone").targetAnswer("%1$s pokes %2$s"), //
+			cmd("pout", "Pout").answer("%1$s pouts").targetAnswer("%1$s pouts at %2$s"), //
+			cmd("respect", "Pay respects")
+					.answer("https://cdn.discordapp.com/attachments/831093717376172032/831280368782409798/f.gif"), //
+			cmd("ride", "You can guess what this does~").nsfw().targetAnswer("%1$s rides %2$s"), //
+			cmd("ride_gif", "You can guess what this does~").nsfw().targetAnswer("%1$s rides %2$s"), //
+			cmd("saved", "Saved")
+					.answer("https://cdn.discordapp.com/attachments/831093717376172032/831279675858223124/saved.jpg"), //
+			cmd("shrug", "Shrug").answer("%1$s shrugs"), //
+			cmd("sip", "Drink some tea").answer("%1$s sips").targetAnswer("%1$s sips with %2$s")//
+					.aliases("drink").aliasesTargetAnswers("%1$s drinks tea with %2$s"), //
+			cmd("sit", "Sit down").targetAnswer("%1$s sat on %2$s"), //
+			cmd("slap", "Slap someone").targetAnswer("%1$s slaps %2$s"), //
+			cmd("sleepcuddle", "Cuddle in bed with someone").targetAnswer("%1$s cuddles in bed with %2$s"), //
+			cmd("smoosh", "Smoosh someone's face").targetAnswer("%1$s smooshes %2$s"), //
+			cmd("smug", "Ara ara~").answer("%1$s smugs").targetAnswer("%1$s smugs at %2$s"), //
+			cmd("snuggle", "Snuggle with someone").targetAnswer("%1$s snuggles with %2$s"), //
+			cmd("space", "S P A A A C E").answer("%1$s floats in space").targetAnswer("%1$s floats in space with %2$s"), //
+			cmd("spank", "Spank someone").nsfw().targetAnswer("%1$s spanks %2$s"), //
+			cmd("spoderman", "Spider-man would save the world but he's busy making memes"), //
+			cmd("spray", "Pshhhh").targetAnswer("%1$s sprays %2$s"), //
+			cmd("stare", "Stare at someone").answer("*じーーー*").targetAnswer("*じーーー* %2$s"), //
+			cmd("step", "Step on someone").nsfw().targetAnswer("%1$s steps on %2$s"), //
+			cmd("sus", "Something is sus").answer("%1$s thinks something is suspicious")
+					.targetAnswer("%1$s thinks %2$s is suspicious"), //
+			cmd("tickle", "Tickle someone").targetAnswer("%1$s tickles %2$s"), //
+			cmd("titfuck", "Milk someone with your milkers").nsfw().targetAnswer("%1$s titfucks %2$s")
+					.aliases("boobjob").aliasesTargetAnswers("%1$s gives a boobjob to %2$s"), //
+			cmd("vsauce", "Michael here. Or am I?")
+					.answer("https://cdn.discordapp.com/attachments/831093717376172032/831279875871735888/vsauce.png"), //
+			cmd("whip", "Whip someone").nsfw().targetAnswer("%1$s whips %2$s"), //
+			cmd("whoping", "WHO PINGED ME?")
+					.answer("https://cdn.discordapp.com/attachments/397923444072644610/439953147738193920/image.gif"), //
+			cmd("work", "Work work").answer(
+					"https://cdn.discordapp.com/attachments/831093717376172032/831451303489699850/work_work.jpg"), //
+			cmd("yawn", "Yaaaawn").answer("%1$s yawns").targetAnswer("%1$s yawns"), //
+			cmd("yes", "Say yes").targetAnswer("%1$s says yes to %2$s"));
 
 	public void init(final APIUtils apiUtils, final boolean sfwOnly) {
-		addImageCommandSFW(apiUtils, "angry_stare", "Stare at someone angrily", null, "%1$s stares angrily at %2$s");
-		addImageCommandSFW(apiUtils, "birthday", "Wish someone happy birthday", null,
-				"%1$s wishes %2$s happy birthday");
-		addImageCommandSFW(apiUtils, "bite", "Bite someone", null, "%1$s bites %2$s");
-		addImageCommandSFW(apiUtils, "bonk", "Bonk someone on the head", null, "%1$s bonks %2$s");
-		addImageCommandSFW(apiUtils, "boop", "Boop someone", null, "%1$s boops %2$s");
-		addImageCommandSFW(apiUtils, "brazil", "Send someone to Brazil", "%1$s goes to Brazil",
-				"%1$s sends %2$s to Brazil");
-		addImageCommandSFW(apiUtils, "cringe", "Criiinge", "%1$s cringes", "%1$s cringes at %2$s");
-		addImageCommandSFW(apiUtils, "cuddle", "Cuddle with someone", null, "%1$s cuddles with %2$s");
-		addImageCommandSFW(apiUtils, "dance", "Dance dance", "%1$s dances", "%1$s dances for %2$s");
-		addImageCommandSFW(apiUtils, "drool", "heheeeee~", "%1$s drools", "%1$s drools over %2$s");
-		addImageCommandSFW(apiUtils, "everyone", "Everyone!", null, null);
-		addImageCommandSFW(apiUtils, "gay", "Ha! GAYYYYYYYYYYYY", null, null);
-		addImageCommandSFW(apiUtils, "gibhug", "Demand a hug", "%1$s wants a hug", "%1$s wants to be hugged by %2$s");
-		addImageCommandSFW(apiUtils, "gibpat", "Demand a headpat", "%1$s demands a pat",
-				"%1$s demands to be pat by %2$s");
-		addImageCommandSFW(apiUtils, "glomp", "Give someone a surprise hug!", null, "%1$s glomps %2$s");
-		addImageCommandSFW(apiUtils, "good_night", "Sleep well", null, null);
-		addImageCommandSFW(apiUtils, "hehe", "Smile", null, null);
-		addImageCommandSFW(apiUtils, "hora", "Hora hora~", null, null);
-		addImageCommandSFW(apiUtils, "hug", "Hug someone", null, "%1$s hugs %2$s");
-		addImageCommandSFW(apiUtils, "humg", "Humg someone", null, "%1$s humgs %2$s");
-		addImageCommandSFW(apiUtils, "kiss", "Kiss someone", null, "%1$s kisses %2$s");
-		addImageCommandSFW(apiUtils, "lap", "Lap pillow!", "%1$s lays on a lap pillow",
-				"%1$s lets %2$s lay on their lap pillow");
-		addImageCommandSFW(apiUtils, "lick", "Lick someone", null, "%1$s licks %2$s");
-		addImageCommandSFW(apiUtils, "massage", "Massage someone", null, "%1$s massages %2$s");
-		addImageCommandSFW(apiUtils, "no", "Say no", null, null);
-		addImageCommandSFW(apiUtils, "nom", "Nom someone", "%1$s noms", "%1$s noms %2$s");
-		addImageCommandSFW(apiUtils, "nuzzle", "Nuzzle someone", null, "%1$s nuzzles %2$s");
-		addImageCommandSFW(apiUtils, "padoru", "Hashire sori yo, Kaze no you ni, Tsukimihara wo, PADORU PADORU", null,
-				null);
-		addImageCommandSFW(apiUtils, "pat", "Pat someone", null, "%1$s pats %2$s");
-		addImageCommandSFW(apiUtils, "peck", "Peck someone", null, "%1$s pecked %2$s on the cheek");
-		addImageCommandSFW(apiUtils, "pizza", "Give someone pizza", null, "%1$s gave pizza to %2$s");
-		addImageCommandSFW(apiUtils, "poke", "Poke someone", null, "%1$s pokes %2$s");
-		addImageCommandSFW(apiUtils, "pout", "Pout", "%1$s pouts", "%1$s pouts at %2$s");
-		addImageCommandSFW(apiUtils, "shrug", "Shrug", "%1$s shrugs", "%1$s shrugs");
-		addImageCommandSFW(apiUtils, "sip", "Drink some tea", "%1$s sips", "%1$s sips with %2$s", "drink");
-		addImageCommandSFW(apiUtils, "sit", "Sit down", null, "%1$s sat on %2$s");
-		addImageCommandSFW(apiUtils, "slap", "Slap someone", null, "%1$s slaps %2$s");
-		addImageCommandSFW(apiUtils, "sleepcuddle", "Cuddle in bed with someone", null,
-				"%1$s cuddles in bed with %2$s");
-		addImageCommandSFW(apiUtils, "smoosh", "Smoosh someone's face", null, "%1$s smooshes %2$s");
-		addImageCommandSFW(apiUtils, "smug", "Ara ara~", "%1$s smugs", "%1$s smugs at %2$s");
-		addImageCommandSFW(apiUtils, "snuggle", "Snuggle with someone", null, "%1$s snuggles with %2$s");
-		addImageCommandSFW(apiUtils, "space", "S P A A A C E", "%1$s floats in space",
-				"%1$s floats in space with %2$s");
-		addImageCommandSFW(apiUtils, "spoderman", "Spider-man would save the world but he's busy making memes", null,
-				null);
-		addImageCommandSFW(apiUtils, "spray", "Pshhhh", null, null);
-		addImageCommandSFW(apiUtils, "stare", "Stare at someone", "*じーーー*", "*じーーー* %2$s");
-		addImageCommandSFW(apiUtils, "sus", "Something is sus", "%1$s thinks something is suspicious",
-				"%1$s thinks %2$s is suspicious");
-		addImageCommandSFW(apiUtils, "tickle", "Tickle someone", null, "%1$s tickles %2$s");
-		addImageCommandSFW(apiUtils, "yawn", "Yaaaawn", "%1$s yawns", "%1$s yawns");
-		addImageCommandSFW(apiUtils, "yes", "Say yes", null, null);
+		for (final ImageCommandAdder cmd : commands) {
+			if (cmd.nsfw && sfwOnly) {
+				continue;
+			}
 
-		if (!sfwOnly) {
-			addImageCommandNSFW(apiUtils, "assgrab", "Grab some ass", null, "%1$s grabs ass of %2$s");
-			addImageCommandNSFW(apiUtils, "blowjob", "Give someone pleasure", null, "%1$s sucks off %2$s", "suck");
-			addImageCommandNSFW(apiUtils, "boobgrab", "Grab something soft", null, "%1$s grabs boobs of %2$s",
-					"breastgrab", "grope", "titgrab");
-			addImageCommandNSFW(apiUtils, "boobhug", "Give someone happiness", null, "%1$s boobhugs %2$s");
-			addImageCommandNSFW(apiUtils, "bootyshake", "Shake that ass", "%1$s shakes the booty",
-					"%1$s shakes the booty for %2$s");
-			addImageCommandNSFW(apiUtils, "coil", "Coil around someone", null, "%1$s coils around %2$s");
-			addImageCommandNSFW(apiUtils, "facesit", "Sit on someone's face", null, "%1$s sat on the face of %2$s");
-			addImageCommandNSFW(apiUtils, "fuck", "You can guess what this does~", null, "%1$s fucks with %2$s");
-			addImageCommandNSFW(apiUtils, "fuck_gif", "You can guess what this does~", null, "%1$s fucks with %2$s");
-			addImageCommandNSFW(apiUtils, "handjob", "Pleasure someone", null, "%1$s gives a handjob to %2$s");
-			addImageCommandNSFW(apiUtils, "peg", "Peg someone", null, "%1$s pegs %2$s");
-			addImageCommandNSFW(apiUtils, "spank", "Spank someone", null, "%1$s spanks %2$s");
-			addImageCommandNSFW(apiUtils, "step", "Step on someone", null, "%1$s steps on %2$s");
-			addImageCommandNSFW(apiUtils, "titfuck", "Milk someone with your milkers", null, "%1$s titfucks %2$s",
-					"boobjob");
-			addImageCommandNSFW(apiUtils, "whip", "Whip someone", null, "%1$s whips %2$s");
+			cmd.add(apiUtils);
 		}
-
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "feelbonacci", "The feels don't stop",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831280567776706600/feelbonacci.jpg");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "feelsgood", "Mhmmmm~",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831280729404211250/feelsgood.png");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "gaskelly", "GAS GAS GAS",
-				"https://media.discordapp.net/attachments/456149873507565568/585316940193595392/image0_2.gif?comment=DO_YOU_LIKE_MY_CAR?_GUESS_YOU%27RE_READY_CAUSE_IM_WAITING_FOR_YOU._IT%27S_GONNA_BE_EXCITING!_GOT_THIS_FEELING_REALLY_DEEP_IN_MY_SOUL._LETS_GET_OUT_I_WANNA_GO_COME_ALONG_GET_IT_ON._GONNA_TAKE_MY_CAR_GONNA_DRIVE_IT._GONNA_DRIVE_ALONE_TILL_I_GET_YOU_CAUSE_IM_CRAZY_HOT_AND_READY_BUT_YOULL_LIKE_IT._I_WANNA_RACE_FOR_YOU_SHALL_I_GO_NOW._GAS_GAS_GAS_IM_GONNA_STEP_ON_THE_GAS_TONIGHT_ILL_FLY_AND_BE_YOUR_LOVER._YEAH_YEAH_YEAH_ILL_BE_SO_QUICK_AS_A_FLASH_AND_ILL_BE_YOUR_HERO._GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_AND_YOULL_SEE_THE_BIG_SHOW._DONT_BE_LAZY_CAUSE_IM_BURNING_FOR_YOU._ITS_LIKE_A_HOT_SENSATION_GOT_THIS_POWER_THAT_IS_TAKING_ME_OUT._YES_IVE_GOT_A_CRASH_ON_YOU_READY_NOW_READY_GO._GONNA_TAKE_MY_CAR_GONNA_DRIVE_IT._GONNA_DRIVE_ALONE_TILL_I_GET_YOU_CAUSE_IM_CRAZY_HOT_AND_READY_BUT_YOULL_LIKE_IT._I_WANNA_RACE_FOR_YOU_SHALL_I_GO_NOW_GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_AND_YOULL_SEE_THE_BIG_SHOW._GAS_GAS_GAS_IM_GONNA_STEP_ON_THE_GAS_TONIGHT_ILL_FLY_AND_BE_YOUR_LOVER._YEAH_YEAH_YEAH_ILL_BE_SO_QUICK_AS_A_FLASH_AND_ILL_BE_YOUR_HERO._GAS_GAS_GAS_IM_GONNA_RUN_AS_A_FLASH_TONIGHT_ILL_FIGHT_TO_BE_THE_WINNER_YEAH_YEAH_YEAH_IM_GONNA_STEP_ON_THE_GAS_ANY_YOULL_SEE_THE_BIG_SHOW");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "n", "NNNNNNNNNNNNNNNNNNNN-",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831278978693857280/n.gif");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "out", "Show someone exit",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831280225617707058/out.jpg");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "respect", "Pay respects",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831280368782409798/f.gif");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "saved", "Saved",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831279675858223124/saved.jpg");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "vsauce", "Michael here. Or am I?",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831279875871735888/vsauce.png");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "whoping", "WHO PINGED ME?",
-				"https://cdn.discordapp.com/attachments/397923444072644610/439953147738193920/image.gif");
-		addTargetlessImageCommandWithoutAnswer(apiUtils, "work", "Work work",
-				"https://cdn.discordapp.com/attachments/831093717376172032/831451303489699850/work_work.jpg");
 	}
 }
